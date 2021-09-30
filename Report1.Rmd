@@ -1,0 +1,196 @@
+---
+title: "U.S 2020 Election spread analysis"
+author: "Pratyush Singh"
+date: "27/07/2020"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## INTRODUCTION
+
+This is a report on 2020 U.S election votes spread from summarising data of various pollster's reports as of July2020 . The original data was obtained from [this page](https://projects.fivethirtyeight.com/polls-page/president_polls.csv).
+
+We are going to use the following library:
+```{r loading-libs, message=FALSE}
+library(tidyverse)
+library(dslabs)
+library(ggplot2)
+library(prettydoc)
+```
+
+# DATA PREPARATION
+
+
+Initial Table of Data .
+```{r}
+Polls_init <- read.csv("data/president_polls.csv")
+```
+```{r , echo=FALSE}
+ head(Polls_init)
+```
+
+Filter for two major candidate (Donald j. Trump & Joesph Biden), High graded Pollsters & 
+Selected relevant variables .
+Grouped by Unique Question_id for each poll.
+```{r}
+poll_filter <- Polls_init %>% filter(candidate_name %in% c("Donald Trump","Joseph R. Biden Jr.") & (fte_grade %in% c("A+", "A", "A-", "B+") | is.na(fte_grade))) %>% 
+  select("question_id","state","pollster","fte_grade","sample_size","population","start_date","end_date","candidate_name","pct") %>%
+  group_by(question_id)
+```
+```{r , echo=FALSE}
+head(poll_filter)
+```
+Converted Two candidates as variables for comparision in following steps
+
+-Seperated both variables into two different dataframes
+- Merged both variable by unique question_id
+```{r}
+trump2020 <- poll_filter %>% rowid_to_column() %>%spread(candidate_name , pct) %>% select( -rowid , -`Joseph R. Biden Jr.`) %>% filter(!is.na(`Donald Trump`))
+joe_biden2020  <- poll_filter %>% rowid_to_column()%>%spread(candidate_name , pct) %>% filter(!is.na(`Joseph R. Biden Jr.`))%>% select( question_id , `Joseph R. Biden Jr.`) 
+
+poll_2020 <- merge(trump2020 , joe_biden2020 , by = "question_id")
+
+```
+```{r , echo=FALSE}
+head(poll_2020)
+```
+
+Added collumn for spread [ $spread = biden/100 - trump/100$] and Saved rda file ;
+
+-Spread specifies the difference between relative probabilities .
+
+```{r}
+poll2020 <- poll_2020 %>% mutate(spread = `Joseph R. Biden Jr.`/100 -`Donald Trump`/100 ) 
+
+save(poll2020 , file = "rda/poll2020.rda")
+```
+
+```{r , echo=FALSE}
+head(poll2020)
+```
+
+# EXPLORATORY DATA ANALYSIS 
+
+Loading the tidy data
+```{r}
+load( "rda/poll2020.rda")
+```
+The data of various pollster has been summarised to give more accurate result .
+This makes for less poll to poll bias and larger sample sizes 
+
+
+**Initial spread** (without general bias , state- wise bias and poll to poll bias) is ;
+
+$Average = \sum(spread\times samplesize)/\sum(samplesize)$
+
+```{r}
+results <- poll2020 %>%   summarise(avg = sum(spread*sample_size)/sum(sample_size))
+spread <- round(results$avg*100,1)
+```
+
+**SPREAD**
+
+$Spread = round(Average)$
+```{r , echo=FALSE}
+spread
+
+```
+This Spread shows that Joe Biden is Comfortably ahead in polls by <span style="color: red;">**8.1**</span>  percent points 
+
+
+
+**STANDARD DEVIATION** 
+$sd = standard_deviation(spread)/\sqrt(n)$
+
+```{r}
+sd <- sd(poll2020$spread)/sqrt(length(poll2020$spread))
+```
+
+```{r , echo=FALSE}
+sd
+```
+ <span style="color: red;">**0.0057956**</span>
+
+**95% CONFIDENCE INTERVAL FOR CANDIDATE JOE BIDEN**
+```{r}
+tibble(lower_bar =results$avg -qnorm(0.965)*sd , upper_bar=results$avg +qnorm(0.965)*sd) 
+```
+ There is 95% chance of spread to be between <span style="color: red;">**0.0705911 -	0.09159332**</span>	
+
+**UN-BIASED ANALYSIS** 
+
+Taking account of different biases in polling data 
+The statistics are re-analysed using Bayesian Sats .
+
+**BIASES**
+```{r}
+tau <- 0.035  # general bias in U.S poll results from hitorical data
+sigma_b <- 0.03 # median state-wise bias from last year's election
+mu <- 0.0 # pollster bias is taken as 0 , assuming for each pollster biased towards Trump there is one                  biased towards Biden
+sigma <- sqrt(sd^2 + sigma_b^2)
+B <-  sigma^2 /(sigma^2 + tau^2)
+# Bayesian variables
+```
+
+**UN-BIASED SPREAD**
+$Biased Average = B \times \mu + (1 -B) \times(Average)$
+```{r}
+p_mean <- B*mu + (1-B)*results$avg
+spread_biased <- round(p_mean*100 , 1)
+```
+```{r , echo=FALSE}
+spread_biased
+
+```
+ This Spread shows that Joe Biden is still ahead in polls even after taking the genral bias in account by  <span style="color: red;">**4.6**</span> percent points
+
+**UN-BIASED STANDARD ERROR**
+SE = $\sqrt(1 / (1/(\sigma)^2 + 1/(\tau)^2)$
+```{r}
+p_se <- sqrt(1 /(1/sigma^2 + 1/tau^2))
+```
+```{r , echo = FALSE}
+p_se
+
+```
+ <span style="color: red;">**0.02301765**</span>
+
+
+**UN-BIASED 95% CONFIDENCE INTERVAL** 
+```{r}
+tibble(lower_bar =p_mean -qnorm(0.965)*p_se , upper_bar=p_mean +qnorm(0.965)*p_se) 
+```
+ There is 95% chance of spread to be between <span style="color: red;">**0.004313939 -	0.08772578**</span>	
+
+**PROBABILITY OF JOE BIDEN TO WIN THE POPULAR VOTE**
+```{r ,echo=FALSE}
+(1 - pnorm(0 , p_mean,p_se))*100
+```
+There is  <span style="color: red;">**97.72%**</span> probabilty of Joe Biden to win the popular votes. 
+
+**VISUAL COMPARISON OF TWO MODELS **
+```{r , echo=FALSE}
+spread_data <- tibble(stat = c("Biased" , "Unbiased") , avg = c(results$avg , p_mean) ,
+                      se = c(sd , p_se))
+```
+
+```{r , echo= FALSE}
+spread_data %>% ggplot() + geom_pointrange(aes(stat , avg ,
+                                                              ymin = avg - qnorm(0.965)*se ,
+                                                              ymax = avg +qnorm(0.965)*se , 
+                                                              color = stat )) + theme_dark()
+```
+
+## CONCLUSION
+
+Although Unbiased analysis increases the confidence interval significantly , as well as reduces the spread by almost half . The statistics still shows the polls to be significantly in favour of Joe Biden and none of the confidence interval include 0 .
+So we can confidently conclude the polls to be in favour of Joe Biden as of July 2020
+
+
+
